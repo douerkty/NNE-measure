@@ -156,7 +156,7 @@ class InstrumentLockin7270:
                     if target_value > 2.99 * max(self.SENSITIVITY_SCALE.values()):
                         suitable_key = max(self.SENSITIVITY_SCALE.keys())
                     elif target_value < min(self.SENSITIVITY_SCALE.values()):
-                        suitable_key = min(self.SENSITIVITY_SCALE.keys())+2
+                        suitable_key = min(self.SENSITIVITY_SCALE.keys())
 
             command = f'{cmd_prefix} {suitable_key}'
             print(f'Send set sensitivity command: {command}')
