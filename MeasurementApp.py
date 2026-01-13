@@ -15,7 +15,8 @@ class MeasurementApp:
 
         # Asserting that the data_logger has a 'fig' attribute.
         assert hasattr(self.data_logger, 'fig'), "DataLogger does not have the 'fig' attribute!"
-        self.gui = MeasurementGUI(self.start_measurement, self.stop_program, self.data_logger)
+        # Use a compatibility wrapper that accepts a `config` dict from the refactored GUI.
+        self.gui = MeasurementGUI(self.start_measurement_from_config, self.stop_program, self.data_logger)
         #self.measurement_thread = MeasurementThread()
         self.instrument_manager = InstrumentManager()
         self.measurement_thread=None
@@ -85,6 +86,71 @@ class MeasurementApp:
             f"Starting measurement thread with Temperature Changing Parameters: Initial: {initial_temp}, Final: {final_temp}, Step: {step_temp}, Rate: {rate}")
         print(temp_list)
         # 创建MeasurementThread并传递所有必要的参数
+        self.measurement_thread = MeasurementThread(
+            self.gui,
+            self.data_logger,
+            host,
+            port,
+            self.instrument_manager.inst1,
+            self.instrument_manager.inst2,
+            self.instrument_manager.my_instrument_current,
+            amplitude_values,
+            wait_time,
+            temperature_changing,
+            temp_list,
+            rate,
+            current_dc_val,
+            frequency
+        )
+        self.measurement_thread.measurementDone.connect(self.handle_measurement_done)
+        self.measurement_thread.updatePlotSignal.connect(self.gui.refresh_plot)
+        self.data_logger.updateTemperatureAmplitude.connect(self.gui.update_temperature_amplitude)
+        self.measurement_thread.start()
+
+    def start_measurement_from_config(self, config):
+        """Compatibility wrapper: starts a measurement using `config` dict from the refactored GUI.
+
+        This maps the new GUI's config structure into the legacy measurement flow.
+        """
+        host = config["ppms"]["host"]
+        port = config["ppms"]["port"]
+        inst1_ip = config["lockins"]["lock1_ip"]
+        inst2_ip = config["lockins"]["lock2_ip"]
+        harm1 = config["lockins"].get("lock1_harm", 2)
+        harm2 = config["lockins"].get("lock2_harm", 4)
+        heater_addr = config["sources"]["lakeshore_ip"]
+        dc1_addr = config["sources"]["dc1_addr"]
+        dc2_addr = config["sources"]["dc2_addr"]
+        amplitude_values = config["sweep"]["points"]
+        wait_time = config["data"].get("wait_time", 70)
+        temperature_changing = config["ppms"].get("enable", False)
+        initial_temp = config["ppms"].get("target_T", 0.0)
+        final_temp = initial_temp
+        step_temp = 0
+        rate = config["ppms"].get("rate", 1)
+        frequency = config["sources"].get("heater_freq", 17.777)
+
+        # Save directory (GUI overrides config if filled)
+        save_directory = self.gui.folder_input.text() or config["data"].get("save_folder", ".")
+        self.data_logger.set_save_directory(save_directory)
+
+        # Try to update GUI amplitude list (compat API)
+        try:
+            self.gui.update_amplitude_list(amplitude_values)
+        except Exception:
+            pass
+
+        # Connect instruments and setup DC sources
+        self.instrument_manager.connect_instruments(inst1_ip, inst2_ip, heater_addr, dc1_addr, dc2_addr, harm1=harm1, harm2=harm2)
+        current_dc_val = config["sources"].get("idc1", 1e-6)
+        self.instrument_manager.setup_dc_sources(current_val=current_dc_val)
+
+        # Temperature plan
+        temp_list = []
+        if temperature_changing:
+            temp_list = self.generate_temp_list(initial_temp, final_temp, step_temp)
+
+        # Start measurement thread (similar to legacy method)
         self.measurement_thread = MeasurementThread(
             self.gui,
             self.data_logger,

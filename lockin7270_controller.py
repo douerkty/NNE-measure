@@ -119,10 +119,13 @@ class InstrumentLockin7270:
         return self._query_device(cdm='MAG2. ')
 
     def query_sensitivity1(self):
-        return self._query_device(cdm='SEN1. ')
+    # 7270 的 SEN 查询通常返回档位编号(1~27)，这里映射成满量程电压 FS (V)
+        key = int(float(self._query_device(cdm='SEN1. ')))
+        return self.SENSITIVITY_SCALE[key]
 
     def query_sensitivity2(self):
-        return self._query_device(cdm='SEN2. ')
+        key = int(float(self._query_device(cdm='SEN2. ')))
+        return self.SENSITIVITY_SCALE[key]
 
     def query_phase1(self):
         return self._query_device(cdm='PHA1. ')
@@ -136,49 +139,63 @@ class InstrumentLockin7270:
             raise ValueError('Error: No suitable sensitivity found')
         return max(suitable_keys)
 
-    def adjust_sensitivity(self, sen_function, query_function, cmd_prefix, max_attempts=3):
+    def adjust_sensitivity(self, sen_function, query_function, cmd_prefix, max_attempts=3,
+                       low_ratio=0.10, high_ratio=0.90, settle_time=1.0):
+        """
+    自动调整灵敏度(SEN)，让信号幅值落在 [low_ratio, high_ratio] * FS 范围内。
+    注意：这里假设 sen_function() 返回的是满量程电压 FS (V)，
+         所以 query_sensitivity1/2 需要做 key->FS 映射（上面已给出）。
+    """
         attempts = 0
 
-        while attempts < max_attempts:
-            target_value = float(query_function())
-            current_sensitivity = float(sen_function())
+        # 按 FS 从小到大排序
+        scale_items = sorted(self.SENSITIVITY_SCALE.items(), key=lambda kv: kv[1])
+        min_key, min_fs = scale_items[0]
+        max_key, max_fs = scale_items[-1]
 
-            if 0.5 * current_sensitivity <= target_value <= 2.99 * current_sensitivity:
+        while attempts < max_attempts:
+            target_value = float(query_function())   # e.g. MAG1 (V)
+            current_fs = float(sen_function())       # FS (V)
+
+            # 当前档位已合适
+            if (low_ratio * current_fs) <= target_value <= (high_ratio * current_fs):
                 print("Current sensitivity setting is appropriate for the target value.")
                 return
 
-            if target_value > 2.99 * current_sensitivity or target_value < 0.5 * current_sensitivity:
-                # Find a suitable sensitivity that makes the target_value fall between 10% to 33% of the sensitivity
-                suitable_key = next(
-                    (k for k, v in self.SENSITIVITY_SCALE.items() if 1.1 * v <= target_value <= 2.99 * v), None)
+            # 选择合适档位：选最小的 FS，使 target_value <= high_ratio * FS
+            if target_value <= (low_ratio * min_fs):
+                suitable_key = min_key
+            elif target_value >= (high_ratio * max_fs):
+                suitable_key = max_key
+            else:
+                suitable_key = None
+                for k, fs in scale_items:
+                    if target_value <= (high_ratio * fs):
+                        suitable_key = k
+                        break
+                if suitable_key is None:
+                    suitable_key = max_key
 
-                if not suitable_key:  # If no suitable sensitivity found in the defined range
-                    if target_value > 2.99 * max(self.SENSITIVITY_SCALE.values()):
-                        suitable_key = max(self.SENSITIVITY_SCALE.keys())
-                    elif target_value < min(self.SENSITIVITY_SCALE.values()):
-                        suitable_key = min(self.SENSITIVITY_SCALE.keys())
-
-            command = f'{cmd_prefix} {suitable_key}'
-            print(f'Send set sensitivity command: {command}')
+            command = f"{cmd_prefix.strip()} {suitable_key}"
+            print(f"Send set sensitivity command: {command}")
             self.inst.clear()
             time.sleep(0.05)
-            self.inst.write_raw(command + '\r')
-            time.sleep(60)
+            self.inst.write_raw(command + "\r")
+            time.sleep(settle_time)  # 原来 60s 太长，这里默认 1s，可按 time constant 调大
 
-            # Validate the setting
-            updated_sensitivity = float(sen_function())
+            # 验证设置是否合理
+            updated_fs = float(sen_function())
             updated_value = float(query_function())
-            print(f"Updated sensitivity setting: {updated_sensitivity}, Updated value: {updated_value}")
+            print(f"Updated sensitivity FS: {updated_fs}, Updated value: {updated_value}")
 
-            if 0.5 * updated_sensitivity <= updated_value <= 2.99 * updated_sensitivity:
+            if (low_ratio * updated_fs) <= updated_value <= (high_ratio * updated_fs):
                 print("Updated sensitivity setting is appropriate for the updated value.")
                 return
-            else:
-                print(f"Warning: The sensitivity setting might not be optimal for the updated value of {updated_value}")
 
+            print(f"Warning: SEN may be suboptimal; value={updated_value} FS={updated_fs}")
             attempts += 1
 
-        print("Warning: Unable to find suitable sensitivity setting after multiple attempts.")
+    print("Warning: Unable to find suitable sensitivity setting after multiple attempts.")
 
     def set_sensitivity1(self, max_attempts=3):
         self.adjust_sensitivity(self.query_sensitivity1, self.query_voltage1, 'SEN1 ', max_attempts)

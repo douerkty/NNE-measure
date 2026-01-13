@@ -31,9 +31,6 @@ class InstrumentManager:
         if not self.my_instrument_current:
             print("Connecting Lakeshore Precision Source as heater...")
             self.my_instrument_current = LakeshoreController(ip_address=heater_addr)
-        # 修改前 (使用 2400)
-        # if not self.dc_source1:
-        #     self.dc_source1 = Keithley2400_DCSource(dc1_addr)
 
         # 修改后 (使用 6221)
         if not self.dc_source1:
@@ -45,22 +42,11 @@ class InstrumentManager:
             self.dc_source2 = Keithley6221_DCSource(dc2_addr)
             
         print("Instruments connected.")
-    '''
-    def _adapter_output_sine_current(self, amplitude, frequency, offset=0.0, phase=0.0):
-        """
-        适配器方法：将旧的调用方式转换为 Keithley 6221 的调用方式。
-        注意：Keithley 6221 不需要 offset 和 phase 参数，这里忽略它们。
-        """
-        print(f"Adapter: Setting Keithley 6221 to {frequency}Hz, {amplitude}A")
-        # 调用 keithley_drivers.py 中的方法
-        self.my_instrument_current.setup_sine_wave(frequency, amplitude)
-    '''       
-    # 文件名: InstrumentManager.py
 
     # ... (类定义和 connect_instruments 方法) ...
 
-    def setup_dc_sources(self, current_val=10e-6):
-        """配置并开启所有直流源，并设置锁相放大器为 2f 模式。"""
+    def setup_dc_sources(self, current_val=10e-6,harm1=2, harm2=4):
+        """配置并开启所有直流源，并设置锁相放大器默认为 2f和4f 模式。"""
         
         # 1. 配置并开启直流源
         if self.dc_source1 and self.dc_source2:
@@ -70,8 +56,7 @@ class InstrumentManager:
             self.dc_source2.enable_output()
             print("DC Sources initialized and enabled.")
         
-        # 【核心修改：一台锁 2f，一台锁 4f】
         if self.inst1 and self.inst2:
-            self.inst1.set_harmonic(2)   # 纵向：2ω (Fig.1e/f + Fig.2a)
-            self.inst2.set_harmonic(4)   # 横向：4ω (Fig.2b) ← 必须是 4！
-            print("Lock-in 1 → 2f (longitudinal), Lock-in 2 → 4f (transverse NNE)")
+            print(f"Setting Lock-in Harmonics: Inst1 -> {harm1}f, Inst2 -> {harm2}f")
+            self.inst1.set_harmonic(harm1)
+            self.inst2.set_harmonic(harm2)
