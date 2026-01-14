@@ -69,11 +69,16 @@ class MeasurementApp:
         self.data_logger.set_save_directory(save_directory)
         # 在 MeasurementApp 的 start_measurement 方法中
         self.gui.update_amplitude_list(amplitude_values)
-        # 传递新的地址参数给我们在第一步中修改过的 InstrumentManager
-        self.instrument_manager.connect_instruments(inst1_ip, inst2_ip, heater_addr, dc1_addr, dc2_addr)
-        # [新增] 初始化直流源 (给温度计供电，例如 10uA)
-        current_dc_val = 0.00001  # 10uA
-        self.instrument_manager.setup_dc_sources(current_val=current_dc_val)
+        # 传递新的地址参数给 InstrumentManager（依赖于当前测量模式）
+        mode_key = 'fig1' if self.gui.mode_combo.currentText().startswith("Fig.1e") else 'fig2'
+        self.instrument_manager.connect_instruments(inst1_ip, inst2_ip, heater_addr, dc1_addr, dc2_addr, mode=mode_key)
+
+        # 仅在 Fig.1 模式下初始化并打开直流源 (用于 R vs T 的直流偏置)
+        if mode_key == 'fig1':
+            current_dc_val = 0.00001  # 10uA
+            self.instrument_manager.setup_dc_sources(current_val=current_dc_val)
+        else:
+            current_dc_val = 0.0  # 不使用直流偏置
         # 从GUI获取temperature相关的设置
         # temperature_changing = self.gui.temp_changing_checkbox.isChecked()  # Assuming you used a QCheckBox for this
         # initial_temp = float(self.gui.initial_temp_input.text())
@@ -140,10 +145,16 @@ class MeasurementApp:
         except Exception:
             pass
 
-        # Connect instruments and setup DC sources
-        self.instrument_manager.connect_instruments(inst1_ip, inst2_ip, heater_addr, dc1_addr, dc2_addr, harm1=harm1, harm2=harm2)
-        current_dc_val = config["sources"].get("idc1", 1e-6)
-        self.instrument_manager.setup_dc_sources(current_val=current_dc_val)
+        # Connect instruments and setup DC sources depending on mode
+        mode_key = config.get("mode_key", "fig1")
+        self.instrument_manager.connect_instruments(inst1_ip, inst2_ip, heater_addr, dc1_addr, dc2_addr, mode=mode_key, harm1=harm1, harm2=harm2)
+
+        if mode_key == 'fig1':
+            current_dc_val = config["sources"].get("idc1", 1e-6)
+            self.instrument_manager.setup_dc_sources(current_val=current_dc_val)
+        else:
+            # Fig.2 modes do not use DC sources
+            current_dc_val = 0.0
 
         # Temperature plan
         temp_list = []

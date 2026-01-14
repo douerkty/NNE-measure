@@ -179,8 +179,9 @@ class MeasurementGUIRefactored(QWidget):
         lock_form.addRow(self.lock_auto_sen)
 
         # DC sources (K6221)
-        dc_box = QGroupBox("Keithley 6221 (DC probing)", self)
-        dc_form = QFormLayout(dc_box)
+        # 存为 self.dc_box 以便在模式切换时显示/隐藏
+        self.dc_box = QGroupBox("Keithley 6221 (DC probing)", self)
+        dc_form = QFormLayout(self.dc_box)
 
         self.dc1_addr = QLineEdit(self.DEFAULT_DC1_ADDR, self)
         self.dc2_addr = QLineEdit(self.DEFAULT_DC2_ADDR, self)
@@ -202,9 +203,16 @@ class MeasurementGUIRefactored(QWidget):
         heater_form.addRow("Frequency (Hz):", self.heater_freq)
 
         layout.addWidget(lock_box)
-        layout.addWidget(dc_box)
+        layout.addWidget(self.dc_box)
         layout.addWidget(heater_box)
         layout.addStretch(1)
+
+        # Ensure DC controls visibility reflects initial mode selection
+        try:
+            self._apply_mode_defaults()
+        except Exception:
+            pass
+
         return w
 
     def _tab_heater_sweep(self):
@@ -284,7 +292,6 @@ class MeasurementGUIRefactored(QWidget):
         btn_row.addWidget(self.stop_btn)
         parent_layout.addLayout(btn_row)
 
-    # ---------------- events ----------------
     def _apply_mode_defaults(self):
         # Called after mode selection changes; safe even before lockin widgets exist.
         if not hasattr(self, "lock1_harm"):
@@ -293,9 +300,20 @@ class MeasurementGUIRefactored(QWidget):
         if text.startswith("Fig.1e/1f"):
             self.lock1_harm.setCurrentText("2")
             self.lock2_harm.setCurrentText("2")
+            # Show DC sources controls in Fig.1 modes
+            if hasattr(self, 'dc_box'):
+                self.dc_box.setVisible(True)
         else:
             self.lock1_harm.setCurrentText("2")
             self.lock2_harm.setCurrentText("4")
+            # Hide DC sources controls in Fig.2 modes, and clear DC currents
+            if hasattr(self, 'dc_box'):
+                self.dc_box.setVisible(False)
+                try:
+                    self.idc1.setText("0.0")
+                    self.idc2.setText("0.0")
+                except Exception:
+                    pass
 
     def _on_mode_changed(self, index):
         """Signal handler for mode combo changes (Qt passes index).

@@ -21,15 +21,16 @@ class DataLogger(QObject):
 
     def __init__(self):
         super().__init__()
+        # Only store the essential channels used by the measurement
+        # We keep two voltage channels (Voltage1 = longitudinal, Voltage3 = transverse)
+        # and basic measurement metadata (temperature, field, currents).
         self.data = {
             'Temperature': [], 'Field': [],
-            'Current-AC': [], 
-            'Current-AC-Squared': [], # 新增：存储电流平方
+            'Current-AC': [],
+            'Current-AC-Squared': [],
             'Current-DC': [],
-            'Voltage1': [], 'Phase1': [],
-            'Voltage2': [], 'Phase2': [],
-            'Voltage3': [], 'Phase3': [],
-            'Voltage4': [], 'Phase4': [],
+            'Voltage1': [],  # Longitudinal (used for Fig.1e/1f & Fig.2a)
+            'Voltage3': [],  # Transverse (used for Fig.2b)
         }
         self.lines = []
         self.fig = None
@@ -215,7 +216,6 @@ class DataLogger(QObject):
 
         temperature=T
         amplitude=amplitude
-        # --- 新增计算 ---
         current_ac_sq = amplitude ** 2
         current_dc= current_dc_value
         # 发射信号
@@ -226,10 +226,11 @@ class DataLogger(QObject):
         self._update_data('Current-DC', current_dc)
         self._update_data('Current-AC-Squared', current_ac_sq) # 存储平方值
         try:
-            # Fetch and update values from inst1
-            self._fetch_and_update(inst1, ['Voltage1', 'Phase1', 'Voltage2', 'Phase2'])
-            # Fetch and update values from inst2
-            self._fetch_and_update(inst2, ['Voltage1', 'Phase1', 'Voltage2', 'Phase2'], ['Voltage3', 'Phase3', 'Voltage4', 'Phase4'])
+            # Fetch and update only the two voltage channels we need:
+            # - inst1 Voltage1 -> data['Voltage1']
+            # - inst2 Voltage1 -> data['Voltage3'] (mapped name)
+            self._fetch_and_update(inst1, ['Voltage1'])
+            self._fetch_and_update(inst2, ['Voltage1'], ['Voltage3'])
             self.plot_data()
         except Exception as e:
             print(f"Error during device query: {e}")
