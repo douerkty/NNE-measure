@@ -57,9 +57,11 @@ class MeasurementThread(QThread):
                 time.sleep(60)
                 self.inst1.set_sensitivity2(max_attempts=22)
                 self.inst2.set_sensitivity2(max_attempts=22)
+            # Update data in data_logger (safe to do in worker thread)
             self.data_logger.update_measurements(self.inst1, self.inst2, amplitude, self.host, self.port,self.current_dc_val)
-            self.data_logger.plot_data()
+            # Request GUI thread to update/refresh plot via signal
             self.updatePlotSignal.emit()
+            # Save data (can remain in worker thread; consider moving to background if slow)
             self.data_logger.save_data_to_txt()
         except Exception as e:
             print(f"Error updating data: {e}")

@@ -467,6 +467,14 @@ class MeasurementGUIRefactored(QWidget):
 
     # ---------------- external updates ----------------
     def refresh_plot(self):
+        # Called in the GUI thread via signal from the worker thread.
+        # Let the data logger recompute line data and autoscale, then draw once.
+        try:
+            if hasattr(self, 'data_logger') and hasattr(self.data_logger, 'plot_data'):
+                self.data_logger.plot_data()
+        except Exception as e:
+            print(f"Error in refresh_plot: {e}")
+        # Draw the canvas in the GUI thread only
         self.canvas.draw()
 
     def update_temperature_display(self, temperature):

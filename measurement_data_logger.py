@@ -35,97 +35,49 @@ class DataLogger(QObject):
         self.fig = None
         self.axes = None
         self.save_directory = os.getcwd()
-    '''
+
     def init_plot(self):
-        print("Initializing the plot for Fig 1e and 1f...")
-        self.fig, self.axes = plt.subplots(2, 2, figsize=(10, 8)) # 调整布局
-        
-        # Plot 1: 对应 Fig 1e (T vs I)
-        ax1 = self.axes[0, 0]
-        ax1.set_xlabel('Current-AC (A)')
-        ax1.set_ylabel('Thermometer Signal (V) ~ Delta T')
-        ax1.set_title('Fig 1e: Signal vs I (Parabolic)')
-        
-        # Plot 2: 对应 Fig 1f (T vs I^2)
-        ax2 = self.axes[0, 1]
-        ax2.set_xlabel('Current-AC Squared (A^2)')
-        ax2.set_ylabel('Thermometer Signal (V) ~ Delta T')
-        ax2.set_title('Fig 1f: Signal vs I^2 (Linear)')
 
-        # 初始化线条
-        self.lines = []
-        # Line for Thermometer 1 (Fig 1e)
-        line1, = ax1.plot([], [], 'r-o', label='Thermometer 1')
-        self.lines.append(line1)
-        # Line for Thermometer 1 (Fig 1f)
-        line2, = ax2.plot([], [], 'r-o', label='Thermometer 1 (vs I^2)')
-        self.lines.append(line2)
-        
-        # ... (可以为第二个温度计添加更多线条) ...
-        ax1.legend()
-        ax2.legend()
-    '''
-    def init_plot(self):
-        """Create axes for both modes and keep them available so we can
-        show/hide axes per mode while preserving data.
+        print("Initializing uniform 2x2 grid (Option A)")
+        self.fig, axes = plt.subplots(2, 2, figsize=(12, 9))
+        ax00 = axes[0, 0]
+        ax01 = axes[0, 1]
+        ax10 = axes[1, 0]
+        ax11 = axes[1, 1]
 
-        Mode 'fig1' (Fig.1e/1f + R-T) uses three axes:
-          - Fig1e: I vs V_long
-          - Fig1f: I^2 vs V_long
-          - R-T: Temperature vs Resistance (R = V_long / I_dc when available)
+        # Init default titles/labels for fig1
+        ax00.set_title('Fig. 1e: V_long^{2ω} vs I (parabolic)')
+        ax00.set_xlabel('Current-AC (A)')
+        ax00.set_ylabel('Longitudinal 2ω (V)')
 
-        Mode 'fig2' (Fig.2a/2b) uses two axes:
-          - Fig2a: I vs V_long
-          - Fig2b: I vs V_trans
-        """
-        print("Initializing mode-aware plots")
-        self.fig = plt.figure(figsize=(12, 9))
-        gs = self.fig.add_gridspec(3, 2)
+        ax01.set_title('Fig. 1f: V_long^{2ω} vs I² (linear)')
+        ax01.set_xlabel('Current-AC² (A²)')
+        ax01.set_ylabel('Longitudinal 2ω (V)')
 
-        # Fig1 axes
-        ax1 = self.fig.add_subplot(gs[0, 0])  # Fig1e
-        ax1.set_title('Fig. 1e: V_long^{2ω} vs I (parabolic)')
-        ax1.set_xlabel('Current-AC (A)')
-        ax1.set_ylabel('Longitudinal 2ω (V)')
+        ax10.set_title('R vs T (R = V_long / I_dc)')
+        ax10.set_xlabel('T (K)')
+        ax10.set_ylabel('R (Ω)')
 
-        ax2 = self.fig.add_subplot(gs[0, 1])  # Fig1f
-        ax2.set_title('Fig. 1f: V_long^{2ω} vs I² (linear)')
-        ax2.set_xlabel('Current-AC² (A²)')
-        ax2.set_ylabel('Longitudinal 2ω (V)')
-
-        ax_rt = self.fig.add_subplot(gs[1, 0])  # R vs T
-        ax_rt.set_title('R vs T (R = V_long / I_dc)')
-        ax_rt.set_xlabel('T (K)')
-        ax_rt.set_ylabel('R (Ω)')
-
-        # Fig2 axes (placed on bottom row)
-        ax2a = self.fig.add_subplot(gs[2, 0])  # Fig2a
-        ax2a.set_title('Fig. 2a: V_long^{2ω} vs I (quadratic)')
-        ax2a.set_xlabel('I (A)')
-        ax2a.set_ylabel(r'$V_x^{2\omega}$ (V)')
-
-        ax2b = self.fig.add_subplot(gs[2, 1])  # Fig2b
-        ax2b.set_title('Fig. 2b: V_trans^{4ω} vs I (quartic)')
-        ax2b.set_xlabel('I (A)')
-        ax2b.set_ylabel(r'$V_y^{4\omega}$ (V)')
+        # ax11 reserved and initially hidden
+        ax11.set_visible(False)
 
         # Map modes -> axes and initialize lines
         self.modes = {
             'fig1': {
-                'axes': [ax1, ax2, ax_rt],
-                'lines': []
+                'axes': [ax00, ax01, ax10],
+                'lines': [None, None, None]
             },
             'fig2': {
-                'axes': [ax2a, ax2b],
-                'lines': []
+                'axes': [ax00, ax01],
+                'lines': [None, None]
             }
         }
 
-        # Create empty lines for each axis and store references
-        for mode in self.modes.values():
-            for ax in mode['axes']:
+        # Create empty lines per axis (mode-specific)
+        for mk, mode in self.modes.items():
+            for i, ax in enumerate(mode['axes']):
                 line, = ax.plot([], [], 'o-', lw=2)
-                mode['lines'].append(line)
+                mode['lines'][i] = line
 
         # Start in fig1 mode
         self.active_mode = None
@@ -142,38 +94,31 @@ class DataLogger(QObject):
         T = np.array(self.data['Temperature'][:L]) if self.data['Temperature'] else np.array([])
         I_dc_arr = np.array(self.data['Current-DC'][:L]) if self.data['Current-DC'] else np.zeros(L)
 
-        # Update fig1 lines (if present)
-        if 'fig1' in self.modes:
+        if self.active_mode == 'fig1':
             lines = self.modes['fig1']['lines']
-            # 0: I vs V_long
-            lines[0].set_data(I, V_long)
-            # 1: I^2 vs V_long
-            lines[1].set_data(I**2, V_long)
-            # 2: T vs R (compute R if possible)
+            lines[0].set_data(I, V_long)       # 1e
+            lines[1].set_data(I**2, V_long)    # 1f
             if len(T) > 0:
-                # avoid division by zero
                 with np.errstate(divide='ignore', invalid='ignore'):
                     R = np.where(I_dc_arr != 0, V_long / I_dc_arr, np.nan)
-                # Only plot up to available length
-                lines[2].set_data(T, R)
+                lines[2].set_data(T, R)       # R-T
 
-        # Update fig2 lines
-        if 'fig2' in self.modes:
-            lines2 = self.modes['fig2']['lines']
-            # 0: I vs V_long (Fig2a)
-            lines2[0].set_data(I, V_long)
-            # 1: I vs V_trans (Fig2b)
-            lines2[1].set_data(I, V_trans)
+            # Autoscale axes used by fig1
+            for ax in self.modes['fig1']['axes']:
+                ax.relim()
+                ax.autoscale_view()
 
-        # Rescale visible axes only
-        for mode_key, mode in self.modes.items():
-            for ax in mode['axes']:
-                if ax.get_visible():
-                    ax.relim()
-                    ax.autoscale_view()
+        elif self.active_mode == 'fig2':
+            lines = self.modes['fig2']['lines']
+            lines[0].set_data(I, V_long)       # 2a
+            lines[1].set_data(I, V_trans)      # 2b
 
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
+            # Autoscale axes used by fig2 (top row axes)
+            for ax in self.modes['fig2']['axes']:
+                ax.relim()
+                ax.autoscale_view()
+
+        return
 
     def _update_data(self, key, value):
         try:
@@ -182,20 +127,60 @@ class DataLogger(QObject):
             print(f"Error: Key '{key}' not found in data dictionary.")
 
     def set_mode(self, mode_key: str):
-        """Switch visible axes to the requested mode while preserving data."""
+
         if mode_key == self.active_mode:
             return
-        # hide all axes first
-        for m in self.modes.values():
-            for ax in m['axes']:
-                ax.set_visible(False)
-        # show requested axes
-        if mode_key in self.modes:
-            for ax in self.modes[mode_key]['axes']:
-                ax.set_visible(True)
-            self.active_mode = mode_key
-        else:
+
+        if mode_key not in self.modes:
             print(f"Unknown mode: {mode_key}")
+            return
+
+        # Hide all axes first
+        all_axes = set()
+        for mode in self.modes.values():
+            for ax in mode['axes']:
+                all_axes.add(ax)
+        for ax in all_axes:
+            ax.set_visible(False)
+
+        # Configure and show axes for the selected mode
+        if mode_key == 'fig1':
+            ax1, ax2, ax_rt = self.modes['fig1']['axes']
+            ax1.set_visible(True)
+            ax1.set_title('Fig. 1e: V_long^{2ω} vs I (parabolic)')
+            ax1.set_xlabel('Current-AC (A)')
+            ax1.set_ylabel('Longitudinal 2ω (V)')
+
+            ax2.set_visible(True)
+            ax2.set_title('Fig. 1f: V_long^{2ω} vs I² (linear)')
+            ax2.set_xlabel('Current-AC² (A²)')
+            ax2.set_ylabel('Longitudinal 2ω (V)')
+
+            ax_rt.set_visible(True)
+            ax_rt.set_title('R vs T (R = V_long / I_dc)')
+            ax_rt.set_xlabel('T (K)')
+            ax_rt.set_ylabel('R (Ω)')
+
+        elif mode_key == 'fig2':
+            ax2a, ax2b = self.modes['fig2']['axes']
+            ax2a.set_visible(True)
+            ax2a.set_title('Fig. 2a: V_long^{2ω} vs I (quadratic)')
+            ax2a.set_xlabel('I (A)')
+            ax2a.set_ylabel(r'$V_x^{2\omega}$ (V)')
+
+            ax2b.set_visible(True)
+            ax2b.set_title('Fig. 2b: V_trans^{4ω} vs I (quartic)')
+            ax2b.set_xlabel('I (A)')
+            ax2b.set_ylabel(r'$V_y^{4\omega}$ (V)')
+
+        # Show lines for active mode and hide others
+        for mk, mode in self.modes.items():
+            visible = (mk == mode_key)
+            for ln in mode['lines']:
+                if ln is not None:
+                    ln.set_visible(visible)
+
+        self.active_mode = mode_key
         # redraw canvas
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
