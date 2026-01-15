@@ -4,10 +4,11 @@ from PyQt5.QtWidgets import (
     QFileDialog, QComboBox, QCheckBox, QListWidget, QMessageBox, QTabWidget, QFormLayout
 )
 from PyQt5.QtGui import QColor, QPixmap, QPainter
-from PyQt5.QtCore import pyqtSlot
+from PyQt5.QtCore import pyqtSlot, QTimer
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import numpy as np
+from MultiPyVu import MultiVuClient as mvc
 
 
 class MeasurementGUIRefactored(QWidget):
@@ -24,11 +25,12 @@ class MeasurementGUIRefactored(QWidget):
       - stop_callback()
     """
 
-    def __init__(self, start_callback, stop_callback, data_logger):
+    def __init__(self, start_callback, stop_callback, data_logger, set_temp_callback=None):
         super().__init__()
 
         self.start_callback = start_callback
         self.stop_callback = stop_callback
+        self.set_temp_callback = set_temp_callback
         self.data_logger = data_logger
     
         # Defaults (kept from your current GUI)
@@ -44,8 +46,13 @@ class MeasurementGUIRefactored(QWidget):
         self.showMaximized()
         # 修改模式下拉菜单
         self.mode_combo.clear()
-        self.mode_combo.addItems(["Fig.1e/1f + R-T", "Fig.2a/2b"])
+        self.mode_combo.addItems(["Fig.1e/1f", "R-T", "Fig.2a/2b"])
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+
+        # Start temperature update timer
+        self.temp_timer = QTimer(self)
+        self.temp_timer.timeout.connect(self._update_ppms_temp)
+        self.temp_timer.start(5000)  # Update every 5 seconds
     # ---------------- UI ----------------
     def _build_ui(self):
         main_layout = QHBoxLayout(self)
@@ -112,8 +119,9 @@ class MeasurementGUIRefactored(QWidget):
 
         self.mode_combo = QComboBox(self)
         self.mode_combo.addItems([
-            "Fig.1e/1f (Thermometers ΔR/R, two lock-ins @ 2ω)",
-            "Fig.2a/2b (Thermoelectric: Vx@2ω, Vy@4ω)"
+            "Fig.1e/1f",
+            "R-T",
+            "Fig.2a/2b"
         ])
         form.addRow("Measurement mode:", self.mode_combo)
 
@@ -146,6 +154,10 @@ class MeasurementGUIRefactored(QWidget):
         form.addRow("Stability tol (K):", self.ppms_tol)
         form.addRow("Stable for (s):", self.ppms_stable_sec)
         form.addRow("Timeout (min):", self.ppms_timeout_min)
+
+        self.set_temp_btn = QPushButton("Set Temperature", self)
+        self.set_temp_btn.clicked.connect(self._on_set_temperature)
+        form.addRow(self.set_temp_btn)
 
         return w
 
@@ -297,10 +309,16 @@ class MeasurementGUIRefactored(QWidget):
         if not hasattr(self, "lock1_harm"):
             return
         text = self.mode_combo.currentText()
-        if text.startswith("Fig.1e/1f"):
+        if text == "Fig.1e/1f":
             self.lock1_harm.setCurrentText("2")
             self.lock2_harm.setCurrentText("2")
             # Show DC sources controls in Fig.1 modes
+            if hasattr(self, 'dc_box'):
+                self.dc_box.setVisible(True)
+        elif text == "R-T":
+            # For R-T, harmonics can be 1 or 2, but since we use 1f, set to 1
+            self.lock1_harm.setCurrentText("1")
+            self.lock2_harm.setCurrentText("1")  # or whatever
             if hasattr(self, 'dc_box'):
                 self.dc_box.setVisible(True)
         else:
@@ -324,10 +342,21 @@ class MeasurementGUIRefactored(QWidget):
         # Ensure the UI reflects the selected mode
         self._apply_mode_defaults()
         # Map to DataLogger mode keys and tell the data logger to switch
-        mode_key = "fig1" if self.mode_combo.currentText().startswith("Fig.1e") or "R-T" in self.mode_combo.currentText() else "fig2"
+        text = self.mode_combo.currentText()
+        if text == "Fig.1e/1f":
+            mode_key = "fig1ef"
+            use_1f = False
+        elif text == "R-T":
+            mode_key = "rt"
+            use_1f = True
+        else:
+            mode_key = "fig2"
+            use_1f = False
+        print(f"Switching to mode: {mode_key}, use_1f: {use_1f}")
         try:
             # data_logger may not exist in unit tests, so guard
-            if hasattr(self, 'data_logger') and hasattr(self.data_logger, 'set_mode'):
+            if hasattr(self, 'data_logger'):
+                self.data_logger.set_use_1f_for_rt(use_1f)
                 self.data_logger.set_mode(mode_key)
         except Exception as e:
             print(f"Error switching mode on data logger: {e}")
@@ -351,9 +380,36 @@ class MeasurementGUIRefactored(QWidget):
         if folder_path:
             self.folder_input.setText(folder_path)
 
+    def _on_set_temperature(self):
+        try:
+            ppms_config = {
+                "host": self.ppms_host.text().strip(),
+                "port": int(self.ppms_port.text().strip()),
+                "target_T": float(self.ppms_target_T.text().strip()),
+                "rate": float(self.ppms_rate.text().strip()),
+                "tol": float(self.ppms_tol.text().strip()),
+                "stable_sec": float(self.ppms_stable_sec.text().strip()),
+                "timeout_min": float(self.ppms_timeout_min.text().strip()),
+            }
+            # Assume start_callback can handle ppms_only mode or add a separate callback
+            # For now, call start_callback with ppms_only flag
+            if hasattr(self, 'set_temp_callback'):
+                self.set_temp_callback(ppms_config)
+            else:
+                QMessageBox.warning(self, "Not implemented", "Set temperature callback not set.")
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid input", str(e))
+
+    def _on_stop(self):
+        self.stop_callback()
+        self.turn_off_indicator()
+        self.status_line.setText("Stopped")
+
     def _on_start(self):
         try:
             config = self._collect_config()
+            # For measurement, disable PPMS control since it's handled separately
+            config["ppms"]["enable"] = False
         except ValueError as e:
             QMessageBox.warning(self, "Invalid input", str(e))
             return
@@ -362,10 +418,15 @@ class MeasurementGUIRefactored(QWidget):
         self.status_line.setText("Running...")
         self.start_callback(config)
 
-    def _on_stop(self):
-        self.stop_callback()
-        self.turn_off_indicator()
-        self.status_line.setText("Stopped")
+    def _update_ppms_temp(self):
+        try:
+            host = self.ppms_host.text().strip()
+            port = int(self.ppms_port.text().strip())
+            with mvc.MultiVuClient(host, port) as client:
+                T, sT = client.get_temperature()
+                self.temp_line.setText(f"T: {T:.2f} K")
+        except Exception as e:
+            self.temp_line.setText("T: -- K")
 
     # ---------------- helpers ----------------
     def _collect_config(self) -> dict:
@@ -414,7 +475,7 @@ class MeasurementGUIRefactored(QWidget):
 
         mode = {
             "mode_text": self.mode_combo.currentText(),
-            "mode_key": "fig1" if self.mode_combo.currentText().startswith("Fig.1e/1f") else "fig2",
+            "mode_key": "fig1ef" if self.mode_combo.currentText() == "Fig.1e/1f" else ("rt" if self.mode_combo.currentText() == "R-T" else "fig2"),
         }
 
         return {"mode": mode, "ppms": ppms, "lockins": lockins, "sources": sources, "sweep": sweep, "data": data}

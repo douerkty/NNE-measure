@@ -31,11 +31,13 @@ class DataLogger(QObject):
             'Current-DC': [],
             'Voltage1': [],  # Longitudinal (used for Fig.1e/1f & Fig.2a)
             'Voltage3': [],  # Transverse (used for Fig.2b)
+            'Voltage1_1f': [],  # 1f voltage for R-T
         }
         self.lines = []
         self.fig = None
         self.axes = None
         self.save_directory = os.getcwd()
+        self.use_1f_for_rt = False  # Initialize here
 
     def init_plot(self):
 
@@ -46,7 +48,7 @@ class DataLogger(QObject):
         ax10 = axes[1, 0]
         ax11 = axes[1, 1]
 
-        # Init default titles/labels for fig1
+        # Init default titles/labels for fig1ef
         ax00.set_title('Fig. 1e: V_long^{2ω} vs I (parabolic)')
         ax00.set_xlabel('Current-AC (A)')
         ax00.set_ylabel('Longitudinal 2ω (V)')
@@ -55,34 +57,39 @@ class DataLogger(QObject):
         ax01.set_xlabel('Current-AC² (A²)')
         ax01.set_ylabel('Longitudinal 2ω (V)')
 
-        ax10.set_title('R vs T (R = V_long / I_dc)')
+        ax10.set_title('R vs T (R = V_1f / I_dc)' if self.use_1f_for_rt else 'R vs T (R = V_long / I_dc)')
         ax10.set_xlabel('T (K)')
         ax10.set_ylabel('R (Ω)')
 
         # ax11 reserved and initially hidden
         ax11.set_visible(False)
 
-        # Map modes -> axes and initialize lines
+        # Create lines for each axis
+        line1e, = ax00.plot([], [], 'o-', lw=2)
+        line1f, = ax01.plot([], [], 'o-', lw=2)
+        line_rt, = ax10.plot([], [], 'o-', lw=2)
+        line2a, = ax00.plot([], [], 'o-', lw=2)
+        line2b, = ax01.plot([], [], 'o-', lw=2)
+
+        # Map modes -> axes and lines
         self.modes = {
-            'fig1': {
+            'fig1ef': {
                 'axes': [ax00, ax01, ax10],
-                'lines': [None, None, None]
+                'lines': [line1e, line1f, line_rt]
+            },
+            'rt': {
+                'axes': [ax00, ax01, ax10],
+                'lines': [line1e, line1f, line_rt]
             },
             'fig2': {
                 'axes': [ax00, ax01],
-                'lines': [None, None]
+                'lines': [line2a, line2b]
             }
         }
 
-        # Create empty lines per axis (mode-specific)
-        for mk, mode in self.modes.items():
-            for i, ax in enumerate(mode['axes']):
-                line, = ax.plot([], [], 'o-', lw=2)
-                mode['lines'][i] = line
-
-        # Start in fig1 mode
+        # Start in fig1ef mode
         self.active_mode = None
-        self.set_mode('fig1')
+        self.set_mode('fig1ef')
 
     def plot_data(self):
         L = len(self.data['Current-AC'])
@@ -92,20 +99,30 @@ class DataLogger(QObject):
         I = np.array(self.data['Current-AC'][:L])
         V_long = np.array(self.data['Voltage1'][:L])   # 2ω
         V_trans = np.array(self.data['Voltage3'][:L])  # 4ω
+        V_1f = np.array(self.data['Voltage1_1f'][:L])   # 1f for R-T
         T = np.array(self.data['Temperature'][:L]) if self.data['Temperature'] else np.array([])
         I_dc_arr = np.array(self.data['Current-DC'][:L]) if self.data['Current-DC'] else np.zeros(L)
 
-        if self.active_mode == 'fig1':
-            lines = self.modes['fig1']['lines']
+        if self.active_mode == 'fig1ef':
+            lines = self.modes['fig1ef']['lines']
             lines[0].set_data(I, V_long)       # 1e
             lines[1].set_data(I**2, V_long)    # 1f
+
+            # Autoscale axes used by fig1ef
+            for ax in self.modes['fig1ef']['axes']:
+                ax.relim()
+                ax.autoscale_view()
+
+        elif self.active_mode == 'rt':
+            lines = self.modes['rt']['lines']
             if len(T) > 0:
+                V_for_R = V_1f if self.use_1f_for_rt and len(V_1f) > 0 else V_long
                 with np.errstate(divide='ignore', invalid='ignore'):
-                    R = np.where(I_dc_arr != 0, V_long / I_dc_arr, np.nan)
+                    R = np.where(I_dc_arr != 0, V_for_R / I_dc_arr, np.nan)
                 lines[2].set_data(T, R)       # R-T
 
-            # Autoscale axes used by fig1
-            for ax in self.modes['fig1']['axes']:
+            # Autoscale axes used by rt
+            for ax in self.modes['rt']['axes']:
                 ax.relim()
                 ax.autoscale_view()
 
@@ -129,6 +146,7 @@ class DataLogger(QObject):
 
     def set_mode(self, mode_key: str):
 
+        print(f"set_mode called with: {mode_key}")
         if mode_key == self.active_mode:
             return
 
@@ -145,8 +163,8 @@ class DataLogger(QObject):
             ax.set_visible(False)
 
         # Configure and show axes for the selected mode
-        if mode_key == 'fig1':
-            ax1, ax2, ax_rt = self.modes['fig1']['axes']
+        if mode_key == 'fig1ef':
+            ax1, ax2, ax_rt = self.modes['fig1ef']['axes']
             ax1.set_visible(True)
             ax1.set_title('Fig. 1e: V_long^{2ω} vs I (parabolic)')
             ax1.set_xlabel('Current-AC (A)')
@@ -158,7 +176,24 @@ class DataLogger(QObject):
             ax2.set_ylabel('Longitudinal 2ω (V)')
 
             ax_rt.set_visible(True)
-            ax_rt.set_title('R vs T (R = V_long / I_dc)')
+            ax_rt.set_title('R vs T (R = V_1f / I_dc)' if self.use_1f_for_rt else 'R vs T (R = V_1f / I_dc)')
+            ax_rt.set_xlabel('T (K)')
+            ax_rt.set_ylabel('R (Ω)')
+
+        elif mode_key == 'rt':
+            ax1, ax2, ax_rt = self.modes['rt']['axes']
+            ax1.set_visible(True)
+            ax1.set_title('Fig. 1e: V_long^{2ω} vs I (parabolic)')
+            ax1.set_xlabel('Current-AC (A)')
+            ax1.set_ylabel('Longitudinal 2ω (V)')
+
+            ax2.set_visible(True)
+            ax2.set_title('Fig. 1f: V_long^{2ω} vs I² (linear)')
+            ax2.set_xlabel('Current-AC² (A²)')
+            ax2.set_ylabel('Longitudinal 2ω (V)')
+
+            ax_rt.set_visible(True)
+            ax_rt.set_title('R vs T (R = V_1f / I_dc)' if self.use_1f_for_rt else 'R vs T (R = V_long / I_dc)')
             ax_rt.set_xlabel('T (K)')
             ax_rt.set_ylabel('R (Ω)')
 
@@ -176,7 +211,10 @@ class DataLogger(QObject):
 
         # Show lines for active mode and hide others
         for mk, mode in self.modes.items():
-            visible = (mk == mode_key)
+            if mk in ['fig1ef', 'rt']:
+                visible = True  # Both fig1ef and rt show the same lines
+            else:
+                visible = (mk == mode_key)
             for ln in mode['lines']:
                 if ln is not None:
                     ln.set_visible(visible)
@@ -185,6 +223,9 @@ class DataLogger(QObject):
         # redraw canvas
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
+
+    def set_use_1f_for_rt(self, use_1f: bool):
+        self.use_1f_for_rt = use_1f
 
     def save_data_to_txt(self, filename_prefix=None):
         try:
@@ -231,6 +272,15 @@ class DataLogger(QObject):
             # - inst2 Voltage1 -> data['Voltage3'] (mapped name)
             self._fetch_and_update(inst1, ['Voltage1'])
             self._fetch_and_update(inst2, ['Voltage1'], ['Voltage3'])
+            
+            # Fetch 1f voltage if needed for R-T
+            if self.use_1f_for_rt:
+                inst1.set_harmonic(1)
+                time.sleep(1)  # Wait for harmonic change
+                V1f = float(inst1.query_voltage1())
+                self._update_data('Voltage1_1f', V1f)
+                inst1.set_harmonic(2)  # Back to 2f
+            
             self.plot_data()
         except Exception as e:
             print(f"Error during device query: {e}")

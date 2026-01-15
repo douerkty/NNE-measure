@@ -6,6 +6,7 @@ from measurement_data_logger import DataLogger
 from MeasurementGUI import MeasurementGUI
 from MeasurementThread import MeasurementThread
 from InstrumentManager import InstrumentManager
+from MultiPyVu import MultiVuClient as mvc
 
 class MeasurementApp:
     def __init__(self):
@@ -16,7 +17,7 @@ class MeasurementApp:
         # Asserting that the data_logger has a 'fig' attribute.
         assert hasattr(self.data_logger, 'fig'), "DataLogger does not have the 'fig' attribute!"
         # Use a compatibility wrapper that accepts a `config` dict from the refactored GUI.
-        self.gui = MeasurementGUI(self.start_measurement_from_config, self.stop_program, self.data_logger)
+        self.gui = MeasurementGUI(self.start_measurement_from_config, self.stop_program, self.data_logger, self.set_temperature)
         #self.measurement_thread = MeasurementThread()
         self.instrument_manager = InstrumentManager()
         self.measurement_thread=None
@@ -111,6 +112,43 @@ class MeasurementApp:
         self.measurement_thread.updatePlotSignal.connect(self.gui.refresh_plot)
         self.data_logger.updateTemperatureAmplitude.connect(self.gui.update_temperature_amplitude)
         self.measurement_thread.start()
+
+    def set_temperature(self, ppms_config):
+        """Set PPMS temperature without starting measurement."""
+        host = ppms_config["host"]
+        port = ppms_config["port"]
+        target_T = ppms_config["target_T"]
+        rate = ppms_config["rate"]
+        tol = ppms_config["tol"]
+        stable_sec = ppms_config["stable_sec"]
+        timeout_min = ppms_config["timeout_min"]
+
+        try:
+            with mvc.MultiVuClient(host, port) as client:
+                print(f"Setting temperature to {target_T} K at rate {rate} K/min")
+                client.set_temperature(target_T, rate, client.temperature.approach_mode.no_overshoot)
+                # Wait for stability (simple implementation)
+                import time
+                timeout = timeout_min * 60
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    T, sT = client.get_temperature()
+                    if abs(T - target_T) < tol:
+                        stable_count = 0
+                        for _ in range(int(stable_sec)):
+                            time.sleep(1)
+                            T, sT = client.get_temperature()
+                            if abs(T - target_T) < tol:
+                                stable_count += 1
+                            else:
+                                stable_count = 0
+                            if stable_count >= stable_sec:
+                                print(f"Temperature stabilized at {T} K")
+                                return
+                    time.sleep(1)
+                print("Temperature setting timeout")
+        except Exception as e:
+            print(f"Error setting temperature: {e}")
 
     def start_measurement_from_config(self, config):
         """Compatibility wrapper: starts a measurement using `config` dict from the refactored GUI.
