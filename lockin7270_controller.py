@@ -83,19 +83,11 @@ class InstrumentLockin7270:
     def set_harmonic(self, harmonic_order):
         """
         设置锁相放大器的检测谐波次数。
-        为了复现论文 Fig. 1e/f，需要设置为 2 (2nd Harmonic)。
-        
         参数:
             harmonic_order (int): 1 表示基频 (1f), 2 表示倍频 (2f) 等。
         """
         try:
-            # 注意：Signal Recovery 7270 的具体谐波指令通常是 'IE' 或 'REFN'。
-            # 下面使用的是常见指令格式，如果无效，请查阅 7270 手册查找 "Reference Harmonic" 指令。
-            # 假设指令为 IE <n> (0=1f, 1=2f...) 或者直接 REFN <n>
-            
-            # 示例逻辑：根据具体仪器指令集调整字符串
             command = f'REFN {harmonic_order}' 
-            
             print(f'Setting harmonic detection to: {harmonic_order}omega')
             self.inst.write_raw(command + '\r')
             time.sleep(1) # 等待设置生效
